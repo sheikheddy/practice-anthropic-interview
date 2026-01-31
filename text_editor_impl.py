@@ -16,7 +16,11 @@ class TextEditorImpl:
         self._cursor: int = 0
         self._selection: tp.Tuple[int, int] = (-1, -1)
         self._clipboard: tp.Optional[str] = None
-        
+
+        # Multi-document support (Level 4)
+        self._documents: dict[str, tp.Tuple[str, int, tp.Tuple[int, int], dict[int, tp.Tuple[str, int, tp.Tuple[int, int]]], int, bool]] = {}
+        self._current: tp.Optional[str] = None
+
         # History variables for undo/redo (Level 3)
         self._version: int = 0
         # History stores tuples of the entire editor state: (doc, cursor, selection)
@@ -24,6 +28,23 @@ class TextEditorImpl:
             0: (self._doc, self._cursor, self._selection)
         }
         self._can_redo: bool = False
+
+    def _save_document(self):
+        """Persists the current document state if a document is selected."""
+        if self._current is None:
+            return
+        self._documents[self._current] = (
+            self._doc,
+            self._cursor,
+            self._selection,
+            self._history,
+            self._version,
+            self._can_redo,
+        )
+
+    def _load_document(self, name: str):
+        """Loads the document state into the editor."""
+        self._doc, self._cursor, self._selection, self._history, self._version, self._can_redo = self._documents[name]
 
     def _save_state(self):
         """Saves the current editor state to the history for undo/redo."""
@@ -135,4 +156,43 @@ class TextEditorImpl:
         if (self._version + 1) not in self._history:
             self._can_redo = False
 
+        return self._doc
+
+    # ------------------------------------------------------------------
+    # Level 4: Multi-document support
+    # ------------------------------------------------------------------
+
+    def create(self, name: str) -> str:
+        """Creates or opens a document with the given name."""
+        self._save_document()
+
+        if name in self._documents:
+            self._current = name
+            self._load_document(name)
+            return self._doc
+
+        self._current = name
+        self._doc = ""
+        self._cursor = 0
+        self._selection = (-1, -1)
+        self._history = {0: (self._doc, self._cursor, self._selection)}
+        self._version = 0
+        self._can_redo = False
+        self._documents[name] = (
+            self._doc,
+            self._cursor,
+            self._selection,
+            self._history,
+            self._version,
+            self._can_redo,
+        )
+        return self._doc
+
+    def switch(self, name: str) -> str | None:
+        """Switches to an existing document by name."""
+        self._save_document()
+        if name not in self._documents:
+            return None
+        self._current = name
+        self._load_document(name)
         return self._doc

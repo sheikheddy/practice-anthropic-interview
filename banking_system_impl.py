@@ -1,6 +1,3 @@
-import collections
-from trepan.api import debug
-
 class BankingSystemImpl:
     """
     A simplified banking system that supports account creation, deposits, transfers,
@@ -21,31 +18,27 @@ class BankingSystemImpl:
     def _process_pending_events(self, timestamp: int):
         """
         Processes all scheduled payments that should have occurred by the given timestamp.
-        This is the core logic for the time-based event system.
         """
-        # Identify all payments that are pending and due for execution.
-        pending_due_payments = []
-        for payment_id, details in self.scheduled_payments.items():
-            if details['status'] == 'PENDING' and details['exec_time'] <= timestamp:
-                pending_due_payments.append((payment_id, details))
+        pending_due_payments = [
+            (payment_id, details)
+            for payment_id, details in self.scheduled_payments.items()
+            if details['status'] == 'PENDING' and details['exec_time'] <= timestamp
+        ]
 
-        # Sort payments first by execution time, then by creation order (using the payment_id number).
+        # Sort payments first by execution time, then by creation order (payment id number).
         pending_due_payments.sort(key=lambda p: (p[1]['exec_time'], int(p[0][7:])))
 
-        # Process each sorted payment.
         for payment_id, details in pending_due_payments:
             account_id = details['account_id']
             amount = details['amount']
             account = self.accounts.get(account_id)
 
-            # A payment is skipped if the account has insufficient funds.
             if account and account['balance'] >= amount:
                 account['balance'] -= amount
-                account['spent'] += amount  # Successful payments count towards top_spenders.
-                self.scheduled_payments[payment_id]['status'] = 'COMPLETED'
+                account['spent'] += amount
+                details['status'] = 'COMPLETED'
             else:
-                # Also handles cases where the account might have been deleted (not in spec but good practice).
-                self.scheduled_payments[payment_id]['status'] = 'SKIPPED'
+                details['status'] = 'SKIPPED'
 
     # --------------------------------------------------------------------------
     # Level 1 Methods
@@ -60,14 +53,26 @@ class BankingSystemImpl:
 
     def deposit(self, timestamp: int, account_id: str, amount: int) -> int | None:
         self._process_pending_events(timestamp)
+        amount = int(amount)
         if account_id not in self.accounts or amount < 0:
             return None
         self.accounts[account_id]['balance'] += amount
         return self.accounts[account_id]['balance']
 
+    def pay(self, timestamp: int, account_id: str, amount: int) -> int | None:
+        self._process_pending_events(timestamp)
+        amount = int(amount)
+        if account_id not in self.accounts or amount <= 0:
+            return None
+        if self.accounts[account_id]['balance'] < amount:
+            return None
+        self.accounts[account_id]['balance'] -= amount
+        self.accounts[account_id]['spent'] += amount
+        return self.accounts[account_id]['balance']
+
     def transfer(self, timestamp: int, source_account_id: str, target_account_id: str, amount: int) -> int | None:
         self._process_pending_events(timestamp)
-        
+        amount = int(amount)
         # Validate transfer conditions
         if (source_account_id not in self.accounts or
                 target_account_id not in self.accounts or
@@ -91,17 +96,15 @@ class BankingSystemImpl:
 
     def top_spenders(self, timestamp: int, num_accounts: int) -> list[str]:
         self._process_pending_events(timestamp)
-        
-        # Filter out accounts that have not spent anything.
+        num_accounts = int(num_accounts)
+
         spenders = [
-            (acc_id, data) for acc_id, data in self.accounts.items() if data['spent'] > 0
+            (acc_id, data['spent'])
+            for acc_id, data in self.accounts.items()
+            if data['spent'] > 0
         ]
-        
-        # Sort by amount spent (descending), with account_id (lexicographically ascending) as a tie-breaker.
-        spenders.sort(key=lambda item: (-item[1]['spent'], item[0]))
-        
-        # Return the top N account IDs.
-        return [acc_id for acc_id, data in spenders[:num_accounts]]
+        spenders.sort(key=lambda item: (-item[1], item[0]))
+        return [acc_id for acc_id, _ in spenders[:num_accounts]]
 
     # --------------------------------------------------------------------------
     # Level 3 Methods
@@ -109,7 +112,8 @@ class BankingSystemImpl:
 
     def schedule_payment(self, timestamp: int, account_id: str, amount: int, delay: int) -> str | None:
         self._process_pending_events(timestamp)
-        
+        amount = int(amount)
+        delay = int(delay)
         if account_id not in self.accounts or amount <= 0 or delay < 0:
             return None
             
@@ -125,15 +129,17 @@ class BankingSystemImpl:
         return payment_id
 
     def cancel_payment(self, timestamp: int, account_id: str, payment_id: str) -> bool:
-        # Per specification, payments at the given timestamp are processed before cancellations.
+        # Payments due at the timestamp are processed before cancellations.
         self._process_pending_events(timestamp)
 
         payment = self.scheduled_payments.get(payment_id)
-
-        # Cancellation fails if payment doesn't exist, belongs to another account, or is not pending.
-        if (not payment or
-                payment['account_id'] != account_id or
-                payment['status'] != 'PENDING'):
+        if payment is None:
+            return False
+        if payment['account_id'] != account_id:
+            return False
+        if payment['status'] != 'PENDING':
+            return False
+        if payment['exec_time'] <= timestamp:
             return False
 
         payment['status'] = 'CANCELED'

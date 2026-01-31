@@ -24,7 +24,7 @@ class CourseSystemImpl:
         """
         return self.create_course_ext(course_id, course_name, credit, "Standard")
 
-    def register_for_course(self, student_id: str, course_id: str) -> str:
+    def register_for_course(self, student_id: str, course_id: str) -> int | None:
         """
         Registers a student for a course, checking all constraints.
         """
@@ -34,23 +34,23 @@ class CourseSystemImpl:
 
         # Fail if the course does not exist
         if course_id not in self.courses:
-            return ""
+            return None
 
         # Fail if the student is already registered
         if student_id in self.registrations[course_id]:
-            return ""
+            return None
 
         course_credit = self.courses[course_id][1]
 
         # Fail if the student has insufficient credits
         if self.students[student_id] < course_credit:
-            return ""
+            return None
 
         # Process the registration
         self.students[student_id] -= course_credit
         self.registrations[course_id].append(student_id)
 
-        return str(self.students[student_id])
+        return self.students[student_id]
 
     def get_paired_students(self) -> str:
         """
@@ -118,18 +118,18 @@ class CourseSystemImpl:
         self.grades[student_id][course_id][component] = int(grade)
         return return_status
 
-    def get_gpa(self, student_id: str) -> str:
+    def get_gpa(self, student_id: str) -> str | None:
         """
         Calculates a student's GPA summary based on their grades.
         """
         if student_id not in self.students:
-            return ""
+            return None
 
         # Check if all registered courses have at least 3 grade components
         registered_course_ids = [cid for cid, sids in self.registrations.items() if student_id in sids]
         for cid in registered_course_ids:
             if len(self.grades[student_id].get(cid, {})) < 3:
-                return ""
+                return None
 
         total_weighted_grade = 0
         total_standard_credits = 0
@@ -160,3 +160,41 @@ class CourseSystemImpl:
             weighted_avg = int(total_weighted_grade / total_standard_credits)
 
         return f"{weighted_avg}, {pass_count}, {fail_count}"
+
+    def find_nominee(self) -> str:
+        """
+        Finds department nominees based on GPA for students registered in >= 2 courses per department.
+        """
+        departments = sorted({course_id[:3] for course_id in self.courses.keys()})
+        nominees = {}
+
+        for department in departments:
+            eligible = set()
+            seen = set()
+            for course_id, students in self.registrations.items():
+                if not course_id.startswith(department):
+                    continue
+                for student_id in students:
+                    if student_id in seen:
+                        eligible.add(student_id)
+                    seen.add(student_id)
+
+            candidates = sorted(eligible)
+            if not candidates:
+                nominees[department] = ""
+                continue
+
+            best_student = candidates[0]
+            best_gpa = -1
+            for student_id in candidates:
+                gpa = self.get_gpa(student_id)
+                if gpa is None:
+                    continue
+                gpa_value = int(gpa.split(",")[0])
+                if gpa_value > best_gpa:
+                    best_gpa = gpa_value
+                    best_student = student_id
+
+            nominees[department] = best_student if best_gpa >= 0 else ""
+
+        return ", ".join([f"{dep}({nom})" for dep, nom in nominees.items()])

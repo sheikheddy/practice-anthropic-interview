@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Local scratch/AI output
+ai_slop/
+.DS_Store
+
 # C extensions
 *.so
 

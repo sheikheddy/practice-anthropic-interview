@@ -1,6 +1,9 @@
-import inspect, os, sys
+import inspect
+import os
+import sys
+
 current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-parent_dir = os.path.dirname(current_dir)
+parent_dir = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, parent_dir)
 
 from timeout_decorator import timeout
@@ -10,14 +13,10 @@ from integer_container_impl import IntegerContainerImpl
 
 class Level2Tests(unittest.TestCase):
     """
-    The test class below includes 10 tests for Level 2.
-
-    All have the same score.
-    You are not allowed to modify this file, but feel free to read the source code to better understand what is happening in every specific case.
+    IntegerContainer Level 2 tests.
     """
 
     failureException = Exception
-
 
     @classmethod
     def setUp(cls):
@@ -181,3 +180,86 @@ class Level2Tests(unittest.TestCase):
         self.assertTrue(self.container.delete(4))
         self.assertTrue(self.container.delete(5))
         self.assertEqual(self.container.get_median(), 4)
+
+    @timeout(0.4)
+    def test_level_2_case_11_even_length_negative(self):
+        self.assertEqual(self.container.add(-5), 1)
+        self.assertEqual(self.container.add(-1), 2)
+        self.assertEqual(self.container.add(-3), 3)
+        self.assertEqual(self.container.add(-2), 4)
+        self.assertEqual(self.container.get_median(), -3)
+
+    @timeout(0.4)
+    def test_level_2_case_12_median_after_duplicate_deletions(self):
+        for _ in range(4):
+            self.assertEqual(self.container.add(2), _ + 1)
+        self.assertEqual(self.container.get_median(), 2)
+        self.assertTrue(self.container.delete(2))
+        self.assertTrue(self.container.delete(2))
+        self.assertEqual(self.container.get_median(), 2)
+        self.assertTrue(self.container.delete(2))
+        self.assertTrue(self.container.delete(2))
+        self.assertIsNone(self.container.get_median())
+
+    @timeout(0.4)
+    def test_level_2_case_13_median_with_zeros(self):
+        self.assertEqual(self.container.add(0), 1)
+        self.assertEqual(self.container.add(0), 2)
+        self.assertEqual(self.container.add(1), 3)
+        self.assertEqual(self.container.add(-1), 4)
+        self.assertEqual(self.container.get_median(), 0)
+
+    @timeout(0.4)
+    def test_level_2_case_14_median_large_numbers(self):
+        self.assertEqual(self.container.add(1000000), 1)
+        self.assertEqual(self.container.add(1), 2)
+        self.assertEqual(self.container.add(500000), 3)
+        self.assertEqual(self.container.add(2), 4)
+        self.assertEqual(self.container.get_median(), 2)
+
+    @timeout(0.4)
+    def test_level_2_case_15_median_after_interleaved_deletes(self):
+        for v in [10, 20, 30, 40, 50]:
+            self.container.add(v)
+        self.assertEqual(self.container.get_median(), 30)
+        self.assertTrue(self.container.delete(20))
+        self.assertEqual(self.container.get_median(), 30)
+        self.assertTrue(self.container.delete(30))
+        self.assertEqual(self.container.get_median(), 40)
+
+    @timeout(0.4)
+    def test_level_2_case_16_sorted_then_reverse(self):
+        for v in [1, 2, 3, 4, 5]:
+            self.container.add(v)
+        for v in [10, 9, 8, 7, 6]:
+            self.container.add(v)
+        self.assertEqual(self.container.get_median(), 5)
+
+    @timeout(0.4)
+    def test_level_2_case_17_median_after_middle_remove(self):
+        for v in [1, 2, 3, 4, 5]:
+            self.container.add(v)
+        self.assertEqual(self.container.get_median(), 3)
+        self.assertTrue(self.container.delete(3))
+        self.assertEqual(self.container.get_median(), 2)
+
+    @timeout(0.4)
+    def test_level_2_case_18_median_balanced_neg_pos(self):
+        for v in [-3, -2, -1, 1, 2, 3]:
+            self.container.add(v)
+        self.assertEqual(self.container.get_median(), -1)
+
+    @timeout(0.4)
+    def test_level_2_case_19_repeated_get_median(self):
+        for v in [4, 1, 7, 9, 2]:
+            self.container.add(v)
+        self.assertEqual(self.container.get_median(), 4)
+        self.assertEqual(self.container.get_median(), 4)
+        self.assertEqual(self.container.get_median(), 4)
+
+    @timeout(0.4)
+    def test_level_2_case_20_delete_missing_no_change(self):
+        for v in [5, 15, 25]:
+            self.container.add(v)
+        self.assertFalse(self.container.delete(999))
+        self.assertEqual(self.container.get_median(), 15)

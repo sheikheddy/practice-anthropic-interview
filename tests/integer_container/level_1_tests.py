@@ -1,6 +1,9 @@
-import inspect, os, sys
+import inspect
+import os
+import sys
+
 current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-parent_dir = os.path.dirname(current_dir)
+parent_dir = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, parent_dir)
 
 from timeout_decorator import timeout
@@ -10,14 +13,10 @@ from integer_container_impl import IntegerContainerImpl
 
 class Level1Tests(unittest.TestCase):
     """
-    The test class below includes 10 tests for Level 1.
-
-    All have the same score.
-    You are not allowed to modify this file, but feel free to read the source code to better understand what is happening in every specific case.
+    IntegerContainer Level 1 tests.
     """
 
     failureException = Exception
-
 
     @classmethod
     def setUp(cls):
@@ -152,3 +151,87 @@ class Level1Tests(unittest.TestCase):
         self.assertFalse(self.container.delete(500))
         self.assertFalse(self.container.delete(300))
         self.assertFalse(self.container.delete(400))
+
+    @timeout(0.4)
+    def test_level_1_case_11_add_negative_numbers(self):
+        self.assertEqual(self.container.add(-1), 1)
+        self.assertEqual(self.container.add(-2), 2)
+        self.assertEqual(self.container.add(-3), 3)
+        self.assertTrue(self.container.delete(-2))
+        self.assertFalse(self.container.delete(-2))
+
+    @timeout(0.4)
+    def test_level_1_case_12_delete_negative_missing(self):
+        self.assertFalse(self.container.delete(-10))
+        self.assertEqual(self.container.add(-10), 1)
+        self.assertTrue(self.container.delete(-10))
+        self.assertFalse(self.container.delete(-10))
+
+    @timeout(0.4)
+    def test_level_1_case_13_add_zero_values(self):
+        self.assertEqual(self.container.add(0), 1)
+        self.assertEqual(self.container.add(0), 2)
+        self.assertTrue(self.container.delete(0))
+        self.assertTrue(self.container.delete(0))
+        self.assertFalse(self.container.delete(0))
+
+    @timeout(0.4)
+    def test_level_1_case_14_delete_after_reinsert(self):
+        self.assertEqual(self.container.add(7), 1)
+        self.assertTrue(self.container.delete(7))
+        self.assertEqual(self.container.add(7), 1)
+        self.assertEqual(self.container.add(8), 2)
+        self.assertTrue(self.container.delete(7))
+        self.assertTrue(self.container.delete(8))
+        self.assertFalse(self.container.delete(7))
+
+    @timeout(0.4)
+    def test_level_1_case_15_large_values(self):
+        self.assertEqual(self.container.add(10**9), 1)
+        self.assertEqual(self.container.add(-10**9), 2)
+        self.assertTrue(self.container.delete(10**9))
+        self.assertTrue(self.container.delete(-10**9))
+        self.assertFalse(self.container.delete(10**9))
+
+    @timeout(0.4)
+    def test_level_1_case_16_delete_one_of_duplicates(self):
+        self.assertEqual(self.container.add(3), 1)
+        self.assertEqual(self.container.add(3), 2)
+        self.assertEqual(self.container.add(3), 3)
+        self.assertTrue(self.container.delete(3))
+        self.assertTrue(self.container.delete(3))
+        self.assertTrue(self.container.delete(3))
+        self.assertFalse(self.container.delete(3))
+
+    @timeout(0.4)
+    def test_level_1_case_17_interleaved_add_delete(self):
+        self.assertEqual(self.container.add(1), 1)
+        self.assertEqual(self.container.add(2), 2)
+        self.assertTrue(self.container.delete(1))
+        self.assertEqual(self.container.add(3), 2)
+        self.assertFalse(self.container.delete(1))
+        self.assertTrue(self.container.delete(2))
+        self.assertTrue(self.container.delete(3))
+
+    @timeout(0.4)
+    def test_level_1_case_18_add_then_delete_all(self):
+        for i in range(1, 6):
+            self.assertEqual(self.container.add(i), i)
+        for i in range(1, 6):
+            self.assertTrue(self.container.delete(i))
+        self.assertFalse(self.container.delete(3))
+
+    @timeout(0.4)
+    def test_level_1_case_19_delete_out_of_order(self):
+        self.assertEqual(self.container.add(5), 1)
+        self.assertEqual(self.container.add(1), 2)
+        self.assertEqual(self.container.add(3), 3)
+        self.assertTrue(self.container.delete(1))
+        self.assertTrue(self.container.delete(5))
+        self.assertTrue(self.container.delete(3))
+        self.assertFalse(self.container.delete(3))
+
+    @timeout(0.4)
+    def test_level_1_case_20_delete_from_empty(self):
+        self.assertFalse(self.container.delete(999))
+        self.assertFalse(self.container.delete(-999))

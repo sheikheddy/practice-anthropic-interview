@@ -19,6 +19,10 @@ class HashRingVirtual(HashRing):
     def _entry_hash(entry: VirtualRingEntry) -> int:
         return entry[0]
 
+    @staticmethod
+    def _entry_server(entry: VirtualRingEntry) -> str:
+        return entry[2]
+
     @property
     def servers(self) -> set[str]:
         with self._lock:
@@ -26,31 +30,21 @@ class HashRingVirtual(HashRing):
 
     def add_server(self, server_id: str, capacity_factor: int = 1) -> bool:
         assert capacity_factor >= 1
-        with self._lock:
-            if server_id in self._servers:
-                return False
+        return super().add_server(server_id, capacity_factor=capacity_factor)
 
-            self._servers[server_id] = capacity_factor
-            for i in range(capacity_factor):
-                virtual_id = f"{server_id}:{i}"
-                bisect.insort(self._ring, (self._hash(virtual_id), virtual_id, server_id))
-            return True
+    def _add_server_locked(self, server_id: str, capacity_factor: int = 1) -> bool:
+        if server_id in self._servers:
+            return False
 
-    def remove_server(self, server_id: str) -> bool:
-        with self._lock:
-            if server_id not in self._servers:
-                return False
-            del self._servers[server_id]
-            self._ring = [entry for entry in self._ring if entry[2] != server_id]
-            return True
+        self._servers[server_id] = capacity_factor
+        for i in range(capacity_factor):
+            virtual_id = f"{server_id}:{i}"
+            bisect.insort(self._ring, (self._hash(virtual_id), virtual_id, server_id))
+        return True
 
-    def get_server(self, chat_id: str) -> str:
-        with self._lock:
-            if not self._ring:
-                raise ValueError("No servers in ring")
-
-            chat_hash = self._hash(chat_id)
-            idx = bisect.bisect_left(self._ring, chat_hash, key=self._entry_hash)
-            if idx == len(self._ring):
-                idx = 0
-            return self._ring[idx][2]
+    def _remove_server_locked(self, server_id: str) -> bool:
+        if server_id not in self._servers:
+            return False
+        del self._servers[server_id]
+        self._ring = [entry for entry in self._ring if entry[2] != server_id]
+        return True

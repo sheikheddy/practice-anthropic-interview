@@ -69,40 +69,6 @@ class Server:
         del self.vram_chats[victim.chat_id]
         self.ram_chats[victim.chat_id] = victim
 
-    def _ensure_vram_slot(self, exclude_chat_id: str | None = None) -> None:
-        if len(self.vram_chats) < self.max_vram_chats:
-            return
-
-        if len(self.ram_chats) >= self.max_ram_chats:
-            victim_ram = self._oldest_chat(self.ram_chats, exclude_chat_id=exclude_chat_id)
-            if victim_ram is not None:
-                del self.ram_chats[victim_ram.chat_id]
-
-        self._evict_oldest_vram_to_ram()
-
-    def _handle_vram_hit(self, chat_id: str, timestamp: int) -> ChatResponse:
-        self.num_cache_hits += 1
-        self.vram_chats[chat_id].last_timestamp = timestamp
-        return ChatResponse(success=True, llm_reply="")
-
-    def _handle_ram_hit(self, chat_id: str, timestamp: int) -> ChatResponse:
-        self.num_cache_hits += 1
-        chat_data = self.ram_chats[chat_id]
-        chat_data.last_timestamp = timestamp
-
-        self._ensure_vram_slot(exclude_chat_id=chat_id)
-        del self.ram_chats[chat_id]
-        self.vram_chats[chat_id] = chat_data
-        return ChatResponse(success=True, llm_reply="")
-
-    def _handle_cache_miss(self, chat_id: str, timestamp: int) -> ChatResponse:
-        self.num_cache_misses += 1
-        new_chat = ChatData(chat_id=chat_id, last_timestamp=timestamp)
-
-        self._ensure_vram_slot()
-        self.vram_chats[chat_id] = new_chat
-        return ChatResponse(success=True, llm_reply="")
-
     def handle_request(
         self, chat_id: str, timestamp: int, message: str
     ) -> ChatResponse:
@@ -111,9 +77,37 @@ class Server:
                 return ChatResponse(success=False)
 
             if chat_id in self.vram_chats:
-                return self._handle_vram_hit(chat_id, timestamp)
+                self.num_cache_hits += 1
+                self.vram_chats[chat_id].last_timestamp = timestamp
+                return ChatResponse(success=True, llm_reply="")
 
             if chat_id in self.ram_chats:
-                return self._handle_ram_hit(chat_id, timestamp)
+                self.num_cache_hits += 1
+                chat_data = self.ram_chats[chat_id]
+                chat_data.last_timestamp = timestamp
 
-            return self._handle_cache_miss(chat_id, timestamp)
+                if len(self.vram_chats) >= self.max_vram_chats:
+                    if len(self.ram_chats) >= self.max_ram_chats:
+                        victim_ram = self._oldest_chat(
+                            self.ram_chats, exclude_chat_id=chat_id
+                        )
+                        if victim_ram is not None:
+                            del self.ram_chats[victim_ram.chat_id]
+                    self._evict_oldest_vram_to_ram()
+
+                del self.ram_chats[chat_id]
+                self.vram_chats[chat_id] = chat_data
+                return ChatResponse(success=True, llm_reply="")
+
+            self.num_cache_misses += 1
+            new_chat = ChatData(chat_id=chat_id, last_timestamp=timestamp)
+
+            if len(self.vram_chats) >= self.max_vram_chats:
+                if len(self.ram_chats) >= self.max_ram_chats:
+                    victim_ram = self._oldest_chat(self.ram_chats)
+                    if victim_ram is not None:
+                        del self.ram_chats[victim_ram.chat_id]
+                self._evict_oldest_vram_to_ram()
+
+            self.vram_chats[chat_id] = new_chat
+            return ChatResponse(success=True, llm_reply="")

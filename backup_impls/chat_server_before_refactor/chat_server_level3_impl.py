@@ -1,7 +1,6 @@
 import bisect
 import sys
 from dataclasses import dataclass
-from itertools import chain
 
 from chat_server_level2_impl import HashRingVirtual
 
@@ -46,40 +45,17 @@ class ChatClient(HashRingVirtual):
     def add_server(self, server_id: str, capacity_factor: int) -> bool:
         return super().add_server(server_id, capacity_factor)
 
-    def _drop_server_affinities_locked(self, server_id: str) -> None:
-        self.chat_to_server = {
-            chat_id: assigned_server
-            for chat_id, assigned_server in self.chat_to_server.items()
-            if assigned_server != server_id
-        }
-
-    def _get_live_affinity_locked(self, chat_id: str) -> str | None:
-        affinity_server = self.chat_to_server.get(chat_id)
-        if affinity_server is None:
-            return None
-        if affinity_server in self._servers:
-            return affinity_server
-        self.chat_to_server.pop(chat_id, None)
-        return None
-
-    def _set_affinity_if_live_locked(self, chat_id: str, server_id: str) -> None:
-        if server_id in self._servers:
-            self.chat_to_server[chat_id] = server_id
-
-    def _ordered_unique_ring_servers(self, ring_snapshot, chat_id: str) -> list[str]:
-        chat_hash = self._hash(chat_id)
-        start = bisect.bisect_left(ring_snapshot, chat_hash, key=self._entry_hash)
-        wrapped = chain(ring_snapshot[start:], ring_snapshot[:start])
-        ordered = [entry[2] for entry in wrapped]
-        return list(dict.fromkeys(ordered))
-
     def remove_server(self, server_id: str) -> bool:
         with self._lock:
             removed = super().remove_server(server_id)
             if not removed:
                 return False
 
-            self._drop_server_affinities_locked(server_id)
+            self.chat_to_server = {
+                chat_id: assigned_server
+                for chat_id, assigned_server in self.chat_to_server.items()
+                if assigned_server != server_id
+            }
             return True
 
     def _iter_ring_servers(self, chat_id: str):
@@ -88,13 +64,28 @@ class ChatClient(HashRingVirtual):
                 return iter(())
             ring_snapshot = list(self._ring)
 
-        return iter(self._ordered_unique_ring_servers(ring_snapshot, chat_id))
+        chat_hash = self._hash(chat_id)
+        start = bisect.bisect_left(ring_snapshot, chat_hash, key=self._entry_hash)
+        seen: set[str] = set()
+        ordered_servers: list[str] = []
+
+        for offset in range(len(ring_snapshot)):
+            idx = (start + offset) % len(ring_snapshot)
+            server_id = ring_snapshot[idx][2]
+            if server_id in seen:
+                continue
+            seen.add(server_id)
+            ordered_servers.append(server_id)
+        return iter(ordered_servers)
 
     def send_chat_message(self, chat_id: str, message: str) -> str:
         with self._lock:
             if not self._ring:
                 raise RuntimeError("No available servers")
-            affinity_server = self._get_live_affinity_locked(chat_id)
+            affinity_server = self.chat_to_server.get(chat_id)
+            if affinity_server is not None and affinity_server not in self._servers:
+                self.chat_to_server.pop(chat_id, None)
+                affinity_server = None
 
         send_fn = _resolve_post_fn()
         tried: set[str] = set()
@@ -111,7 +102,8 @@ class ChatClient(HashRingVirtual):
             response = send_fn(server_id, chat_id, message)
             if response.success:
                 with self._lock:
-                    self._set_affinity_if_live_locked(chat_id, server_id)
+                    if server_id in self._servers:
+                        self.chat_to_server[chat_id] = server_id
                 return response.llm_reply
 
         with self._lock:
@@ -120,7 +112,9 @@ class ChatClient(HashRingVirtual):
 
     def get_current_server(self, chat_id: str) -> str:
         with self._lock:
-            affinity_server = self._get_live_affinity_locked(chat_id)
-            if affinity_server is not None:
+            affinity_server = self.chat_to_server.get(chat_id)
+            if affinity_server is not None and affinity_server in self._servers:
                 return affinity_server
+            if affinity_server is not None and affinity_server not in self._servers:
+                self.chat_to_server.pop(chat_id, None)
         return self.get_server(chat_id)

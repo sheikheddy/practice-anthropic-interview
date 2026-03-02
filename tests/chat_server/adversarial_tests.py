@@ -399,3 +399,223 @@ class ChatServerAdversarialTests(unittest.TestCase):
         moved = [chat_id for chat_id in chat_ids if before[chat_id] != after[chat_id]]
         self.assertGreater(len(moved), 0)
         self.assertTrue(all(after[chat_id] == "new" for chat_id in moved))
+
+    @timeout(1.0)
+    def test_adv_15_level3_iter_servers_preserves_wrapped_first_occurrence_order(self):
+        client = ChatClient()
+        with client._lock:
+            client._servers = {"a": 2, "b": 2, "c": 1}
+            client._ring = [
+                (10, "a:0", "a"),
+                (20, "b:0", "b"),
+                (30, "a:1", "a"),
+                (40, "c:0", "c"),
+                (50, "b:1", "b"),
+            ]
+
+        original_hash = client._hash
+        try:
+            # Start from hash=25 -> wrapped stream: a, c, b, a, b -> unique: a, c, b
+            client._hash = lambda _chat_id: 25
+            self.assertEqual(list(client._iter_ring_servers("x")), ["a", "c", "b"])
+
+            # Start from hash beyond max -> wrapped stream: a, b, a, c, b -> unique: a, b, c
+            client._hash = lambda _chat_id: 99
+            self.assertEqual(list(client._iter_ring_servers("x")), ["a", "b", "c"])
+        finally:
+            client._hash = original_hash
+
+    @timeout(1.0)
+    def test_adv_16_level4_ram_promotion_excludes_target_from_ram_eviction(self):
+        server = Server(max_vram_chats=2, max_ram_chats=2)
+        server.handle_request("v1", 1, "m")
+        server.handle_request("v2", 2, "m")
+        server.handle_request("r1", 3, "m")
+        server.handle_request("r2", 4, "m")
+
+        # Promote v1 from RAM when both tiers are full.
+        server.handle_request("v1", 5, "m")
+
+        self.assertIn("v1", server.vram_chats)
+        self.assertNotIn("v1", server.ram_chats)
+        self.assertNotIn("v2", server.ram_chats)
+        self.assertIn("r1", server.ram_chats)
+
+    @timeout(1.0)
+    def test_adv_17_level4_ram_tie_eviction_uses_insertion_order(self):
+        server = Server(max_vram_chats=2, max_ram_chats=2)
+        server.handle_request("a", 1, "m")
+        server.handle_request("b", 1, "m")
+        server.handle_request("c", 2, "m")
+        server.handle_request("d", 2, "m")
+
+        # Both RAM entries share oldest timestamp; insertion order should evict "a".
+        server.handle_request("e", 3, "m")
+        self.assertNotIn("a", server.ram_chats)
+        self.assertIn("b", server.ram_chats)
+
+    @timeout(1.2)
+    def test_adv_18_level3_iter_servers_matches_reference_across_random_rings(self):
+        rng = random.Random(20260302)
+        client = ChatClient()
+
+        def expected_order(ring_snapshot, chat_hash: int):
+            if not ring_snapshot:
+                return []
+            start = bisect.bisect_left(ring_snapshot, chat_hash, key=lambda e: e[0])
+            if start == len(ring_snapshot):
+                start = 0
+
+            seen: set[str] = set()
+            ordered: list[str] = []
+            for offset in range(len(ring_snapshot)):
+                idx = (start + offset) % len(ring_snapshot)
+                sid = ring_snapshot[idx][2]
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                ordered.append(sid)
+            return ordered
+
+        original_hash = client._hash
+        try:
+            for _ in range(140):
+                num_servers = rng.randint(1, 7)
+                server_ids = [f"s{i}" for i in range(num_servers)]
+                ring_snapshot = []
+                server_caps = {}
+                for sid in server_ids:
+                    cap = rng.randint(1, 5)
+                    server_caps[sid] = cap
+                    for i in range(cap):
+                        point = rng.randint(0, 2_000_000)
+                        ring_snapshot.append((point, f"{sid}:{i}", sid))
+                ring_snapshot.sort()
+
+                with client._lock:
+                    client._servers = dict(server_caps)
+                    client._ring = list(ring_snapshot)
+
+                # Probe around boundaries and in random interiors.
+                probe_hashes = [0, 2_000_001]
+                probe_hashes.extend(point for point, _, _ in ring_snapshot[:6])
+                probe_hashes.extend(rng.randint(0, 2_000_001) for _ in range(8))
+
+                for probe in probe_hashes:
+                    client._hash = lambda _chat_id, hv=probe: hv
+                    actual = list(client._iter_ring_servers("probe"))
+                    expected = expected_order(ring_snapshot, probe)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual, list(dict.fromkeys(actual)))
+                    self.assertTrue(set(actual).issubset(set(server_ids)))
+        finally:
+            client._hash = original_hash
+
+    @timeout(1.3)
+    def test_adv_19_level4_tie_heavy_randomized_matches_reference(self):
+        @dataclass
+        class RefChat:
+            chat_id: str
+            last_timestamp: int
+
+        class RefServer:
+            def __init__(self, max_vram: int, max_ram: int):
+                self.max_vram_chats = max_vram
+                self.max_ram_chats = max_ram
+                self.vram_chats: dict[str, RefChat] = {}
+                self.ram_chats: dict[str, RefChat] = {}
+                self.num_cache_hits = 0
+                self.num_cache_misses = 0
+                self.is_online = True
+
+            @staticmethod
+            def oldest(chats: dict[str, RefChat], exclude: str | None = None):
+                candidates = [v for k, v in chats.items() if k != exclude]
+                if not candidates:
+                    return None
+                return min(candidates, key=lambda c: c.last_timestamp)
+
+            def evict_vram(self):
+                victim = self.oldest(self.vram_chats)
+                if victim is None:
+                    return
+                del self.vram_chats[victim.chat_id]
+                self.ram_chats[victim.chat_id] = victim
+
+            def ensure_vram_slot(self, exclude_chat_id: str | None = None):
+                if len(self.vram_chats) < self.max_vram_chats:
+                    return
+                if len(self.ram_chats) >= self.max_ram_chats:
+                    victim_ram = self.oldest(self.ram_chats, exclude=exclude_chat_id)
+                    if victim_ram is not None:
+                        del self.ram_chats[victim_ram.chat_id]
+                self.evict_vram()
+
+            def handle(self, chat_id: str, ts: int):
+                if not self.is_online:
+                    return False
+                if chat_id in self.vram_chats:
+                    self.num_cache_hits += 1
+                    self.vram_chats[chat_id].last_timestamp = ts
+                    return True
+                if chat_id in self.ram_chats:
+                    self.num_cache_hits += 1
+                    chat = self.ram_chats[chat_id]
+                    chat.last_timestamp = ts
+                    self.ensure_vram_slot(exclude_chat_id=chat_id)
+                    del self.ram_chats[chat_id]
+                    self.vram_chats[chat_id] = chat
+                    return True
+
+                self.num_cache_misses += 1
+                chat = RefChat(chat_id, ts)
+                self.ensure_vram_slot()
+                self.vram_chats[chat_id] = chat
+                return True
+
+            def remove(self, chat_id: str) -> RefChat | None:
+                if (chat := self.vram_chats.pop(chat_id, None)) is not None:
+                    return chat
+                return self.ram_chats.pop(chat_id, None)
+
+        rng = random.Random(314159)
+        real = Server(max_vram_chats=3, max_ram_chats=3)
+        ref = RefServer(max_vram=3, max_ram=3)
+
+        for _ in range(900):
+            if rng.random() < 0.16:
+                victim = f"c{rng.randint(0, 14)}"
+                real_removed = real.remove_chat(victim)
+                ref_removed = ref.remove(victim)
+                self.assertEqual(real_removed is not None, ref_removed is not None)
+                if real_removed is not None and ref_removed is not None:
+                    self.assertEqual(real_removed.chat_id, ref_removed.chat_id)
+            else:
+                chat_id = f"c{rng.randint(0, 14)}"
+                # Tight timestamp range creates many ties and tie-break scenarios.
+                timestamp = rng.randint(1, 7)
+                real_resp = real.handle_request(chat_id, timestamp, "m")
+                ref_ok = ref.handle(chat_id, timestamp)
+                self.assertEqual(real_resp.success, ref_ok)
+
+            self.assertEqual(real.num_cache_hits, ref.num_cache_hits)
+            self.assertEqual(real.num_cache_misses, ref.num_cache_misses)
+            self.assertEqual(
+                [k for k in real.vram_chats],
+                [k for k in ref.vram_chats],
+            )
+            self.assertEqual(
+                [k for k in real.ram_chats],
+                [k for k in ref.ram_chats],
+            )
+            self.assertEqual(
+                {k: v.last_timestamp for k, v in real.vram_chats.items()},
+                {k: v.last_timestamp for k, v in ref.vram_chats.items()},
+            )
+            self.assertEqual(
+                {k: v.last_timestamp for k, v in real.ram_chats.items()},
+                {k: v.last_timestamp for k, v in ref.ram_chats.items()},
+            )
+            self.assertLessEqual(len(real.vram_chats), real.max_vram_chats)
+            self.assertLessEqual(len(real.ram_chats), real.max_ram_chats)
+            self.assertEqual(set(real.vram_chats).intersection(real.ram_chats), set())

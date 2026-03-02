@@ -4,21 +4,48 @@ hs.alert.show("Hammerspoon config loaded!")
 
 -- Guard so synthetic keystrokes don't re-trigger snippets.
 local injecting = false
+-- Many web/chat inputs require Shift+Return for a literal newline.
+-- Set this to {} if your target editor expects plain Return.
+local NEWLINE_MODS = { "shift" }
+local KEY_GAP_US = 12000
 
--- Types multiline text without touching clipboard.
+local function pressKey(mods, key)
+  hs.eventtap.keyStroke(mods, key, 0)
+  hs.timer.usleep(KEY_GAP_US)
+end
+
+local function clearCurrentLine()
+  -- Remove editor auto-indent so snippet indentation stays exact.
+  pressKey({ "cmd" }, "left")
+  pressKey({ "cmd", "shift" }, "right")
+  pressKey({}, "delete")
+end
+
+local function splitLines(s)
+  local normalized = s:gsub("\r\n", "\n")
+  local out = {}
+  for line in (normalized .. "\n"):gmatch("(.-)\n") do
+    table.insert(out, line)
+  end
+  if #out > 0 and out[#out] == "" then
+    table.remove(out, #out)
+  end
+  return out
+end
+
+-- Inserts multiline text via simulated keypresses (no clipboard use).
 local function typeMultiline(s)
-  local i = 1
-  while i <= #s do
-    local j = s:find("\n", i, true)
-    if j then
-      local line = s:sub(i, j - 1)
-      if #line > 0 then hs.eventtap.keyStrokes(line) end
-      hs.eventtap.keyStroke({}, "return", 0)
-      i = j + 1
-    else
-      local rest = s:sub(i)
-      if #rest > 0 then hs.eventtap.keyStrokes(rest) end
-      break
+  local lines = splitLines(s)
+  for i, line in ipairs(lines) do
+    if i > 1 then
+      clearCurrentLine()
+    end
+    if #line > 0 then
+      hs.eventtap.keyStrokes(line)
+      hs.timer.usleep(KEY_GAP_US)
+    end
+    if i < #lines then
+      pressKey(NEWLINE_MODS, "return")
     end
   end
 end
@@ -478,12 +505,16 @@ local tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
       if #buffer >= #trig and buffer:sub(-#trig) == trig then
         injecting = true
         hs.timer.doAfter(0, function()
-          for _ = 1, #trig do hs.eventtap.keyStroke({}, "delete", 0) end
+          -- In some apps the final trigger key may still land, so delete
+          -- the full trigger token before injecting the snippet.
+          for _ = 1, #trig do
+            pressKey({}, "delete")
+          end
           typeMultiline(out)
           hs.timer.doAfter(0.05, function() injecting = false end)
         end)
         buffer = ""
-        break
+        return true
       end
     end
   end

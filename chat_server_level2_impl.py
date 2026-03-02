@@ -13,7 +13,7 @@ class HashRingVirtual(HashRing):
         # Level 2 builds on Level 1 behavior but changes ring entry shape.
         # (hash, virtual_id, physical_server_id)
         self._ring: list[VirtualRingEntry] = []
-        self._servers: set[str] = set()
+        self._servers: dict[str, int] = {}
 
     @staticmethod
     def _entry_hash(entry: VirtualRingEntry) -> int:
@@ -26,23 +26,25 @@ class HashRingVirtual(HashRing):
     @property
     def servers(self) -> set[str]:
         with self._lock:
-            return set(self._servers)
+            return set(self._servers.keys())
 
-    def add_server(self, server_id: str) -> bool:
-        return super().add_server(server_id)
+    def add_server(self, server_id: str, capacity: int = 1) -> bool:
+        assert capacity >= 1
+        return super().add_server(server_id, capacity=capacity)
 
-    def _add_server_locked(self, server_id: str) -> bool:
+    def _add_server_locked(self, server_id: str, capacity: int = 1) -> bool:
         if server_id in self._servers:
             return False
 
-        self._servers.add(server_id)
-        virtual_id = f"{server_id}:0"
-        bisect.insort(self._ring, (self._hash(virtual_id), virtual_id, server_id))
+        self._servers[server_id] = capacity
+        for i in range(capacity):
+            virtual_id = f"{server_id}:{i}"
+            bisect.insort(self._ring, (self._hash(virtual_id), virtual_id, server_id))
         return True
 
     def _remove_server_locked(self, server_id: str) -> bool:
         if server_id not in self._servers:
             return False
-        self._servers.remove(server_id)
+        del self._servers[server_id]
         self._ring = [entry for entry in self._ring if entry[2] != server_id]
         return True

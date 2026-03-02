@@ -33,7 +33,11 @@ class HashRing(BaseHashRing):
     def _add_server_locked(self, server_id: str) -> bool:
         if server_id in self._servers:
             return False
-        self._servers.add(server_id)
+        if hasattr(self._servers, "add"):
+            self._servers.add(server_id)
+        else:
+            # Defensive compatibility for subclasses that store metadata in dict form.
+            self._servers[server_id] = True
         bisect.insort(self._ring, (self._hash(server_id), server_id))
         return True
 
@@ -41,7 +45,10 @@ class HashRing(BaseHashRing):
         if server_id not in self._servers:
             return False
 
-        self._servers.remove(server_id)
+        if hasattr(self._servers, "remove"):
+            self._servers.remove(server_id)
+        else:
+            del self._servers[server_id]
         server_hash = self._hash(server_id)
         idx = bisect.bisect_left(self._ring, server_hash, key=self._entry_hash)
 

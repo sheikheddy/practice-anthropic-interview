@@ -43,8 +43,8 @@ class ChatClient(HashRingVirtual):
         self.ring = self
         self.chat_to_server: dict[str, str] = {}
 
-    def add_server(self, server_id: str) -> bool:
-        return super().add_server(server_id)
+    def add_server(self, server_id: str, capacity: int = 1) -> bool:
+        return super().add_server(server_id, capacity=capacity)
 
     def _drop_server_affinities_locked(self, server_id: str) -> None:
         self.chat_to_server = {

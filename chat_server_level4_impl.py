@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 import threading
 
-from chat_server_level1_impl import _require_str
-from chat_server_level2_impl import _require_int
 from chat_server_level3_impl import ChatResponse
 
 
@@ -18,8 +16,6 @@ class Server:
     """A server with VRAM and RAM capacity for cached chats."""
 
     def __init__(self, max_vram_chats: int, max_ram_chats: int):
-        max_vram_chats = _require_int(max_vram_chats, "max_vram_chats")
-        max_ram_chats = _require_int(max_ram_chats, "max_ram_chats")
         assert max_vram_chats > 1, "system requires at least 2 to function"
         assert max_ram_chats > 1, "system requires at least 2 to function"
         self.max_vram_chats = max_vram_chats
@@ -37,12 +33,10 @@ class Server:
             return len(self.vram_chats) + len(self.ram_chats)
 
     def has_chat(self, chat_id: str) -> bool:
-        chat_id = _require_str(chat_id, "chat_id")
         with self._lock:
             return chat_id in self.vram_chats or chat_id in self.ram_chats
 
     def remove_chat(self, chat_id: str) -> ChatData | None:
-        chat_id = _require_str(chat_id, "chat_id")
         with self._lock:
             if (chat := self.vram_chats.pop(chat_id, None)) is not None:
                 return chat
@@ -78,9 +72,6 @@ class Server:
     def handle_request(
         self, chat_id: str, timestamp: int, message: str
     ) -> ChatResponse:
-        chat_id = _require_str(chat_id, "chat_id")
-        timestamp = _require_int(timestamp, "timestamp")
-        message = _require_str(message, "message")
         with self._lock:
             if not self.is_online:
                 return ChatResponse(success=False)

@@ -5,15 +5,8 @@ import threading
 type RingEntry = tuple[int, str]
 
 
-def _require_str(value: object, arg_name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{arg_name} must be a str")
-    return value
-
-
 def hash(key: str) -> int:
     """Given a server or chat ID, return a deterministic hash."""
-    key = _require_str(key, "key")
     return int(hashlib.md5(key.encode()).hexdigest()[:16], 16)
 
 
@@ -35,7 +28,6 @@ class HashRing:
         return entry[0]
 
     def add_server(self, server_id: str) -> bool:
-        server_id = _require_str(server_id, "server_id")
         with self._lock:
             if server_id in self._servers:
                 return False
@@ -44,7 +36,6 @@ class HashRing:
             return True
 
     def remove_server(self, server_id: str) -> bool:
-        server_id = _require_str(server_id, "server_id")
         with self._lock:
             if server_id not in self._servers:
                 return False
@@ -61,7 +52,6 @@ class HashRing:
             return True
 
     def get_server(self, chat_id: str) -> str:
-        chat_id = _require_str(chat_id, "chat_id")
         with self._lock:
             if not self._ring:
                 raise ValueError("No servers in ring")

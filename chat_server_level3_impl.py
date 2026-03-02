@@ -2,8 +2,7 @@ import bisect
 import sys
 from dataclasses import dataclass
 
-from chat_server_level1_impl import _require_str
-from chat_server_level2_impl import HashRingVirtual, _require_int
+from chat_server_level2_impl import HashRingVirtual
 
 
 @dataclass(slots=True)
@@ -44,12 +43,9 @@ class ChatClient(HashRingVirtual):
         self.chat_to_server: dict[str, str] = {}
 
     def add_server(self, server_id: str, capacity_factor: int) -> bool:
-        server_id = _require_str(server_id, "server_id")
-        capacity_factor = _require_int(capacity_factor, "capacity_factor")
         return super().add_server(server_id, capacity_factor)
 
     def remove_server(self, server_id: str) -> bool:
-        server_id = _require_str(server_id, "server_id")
         with self._lock:
             removed = super().remove_server(server_id)
             if not removed:
@@ -63,7 +59,6 @@ class ChatClient(HashRingVirtual):
             return True
 
     def _iter_ring_servers(self, chat_id: str):
-        chat_id = _require_str(chat_id, "chat_id")
         with self._lock:
             if not self._ring:
                 return iter(())
@@ -84,8 +79,6 @@ class ChatClient(HashRingVirtual):
         return iter(ordered_servers)
 
     def send_chat_message(self, chat_id: str, message: str) -> str:
-        chat_id = _require_str(chat_id, "chat_id")
-        message = _require_str(message, "message")
         with self._lock:
             if not self._ring:
                 raise RuntimeError("No available servers")
@@ -118,7 +111,6 @@ class ChatClient(HashRingVirtual):
         raise RuntimeError("All servers failed")
 
     def get_current_server(self, chat_id: str) -> str:
-        chat_id = _require_str(chat_id, "chat_id")
         with self._lock:
             affinity_server = self.chat_to_server.get(chat_id)
             if affinity_server is not None and affinity_server in self._servers:

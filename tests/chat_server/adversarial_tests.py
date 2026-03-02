@@ -346,3 +346,102 @@ class ChatServerAdversarialTests(unittest.TestCase):
             self.assertEqual(client.chat_to_server["chat-compat"], "s2")
         finally:
             compat.post_fn = original
+
+    @timeout(1.0)
+    def test_adv_12_level1_type_error_is_clear_for_non_str_hash_input(self):
+        with self.assertRaises(TypeError):
+            hash(123)  # type: ignore[arg-type]
+
+        ring = HashRing()
+        ring.add_server("s1")
+        with self.assertRaises(TypeError):
+            ring.get_server(1)  # type: ignore[arg-type]
+
+    @timeout(1.0)
+    def test_adv_13_level2_capacity_type_error_prevents_str_int_compare(self):
+        ring = HashRingVirtual()
+        with self.assertRaises(TypeError):
+            ring.add_server("s1", "2")  # type: ignore[arg-type]
+
+    @timeout(1.0)
+    def test_adv_14_level2_chat_id_type_error_prevents_encode_failures(self):
+        ring = HashRingVirtual()
+        ring.add_server("s1", 1)
+        with self.assertRaises(TypeError):
+            ring.get_server(99)  # type: ignore[arg-type]
+
+    @timeout(1.0)
+    def test_adv_15_level3_send_message_rejects_non_str_inputs(self):
+        client = ChatClient()
+        client.add_server("s1", 1)
+
+        with self.assertRaises(TypeError):
+            client.send_chat_message("chat-a", 101)  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            client.send_chat_message(202, "hello")  # type: ignore[arg-type]
+
+    @timeout(1.0)
+    def test_adv_16_level4_timestamp_type_error_prevents_ordering_failures(self):
+        server = Server(max_vram_chats=2, max_ram_chats=2)
+        with self.assertRaises(TypeError):
+            server.handle_request("chat-1", "3", "m")  # type: ignore[arg-type]
+
+    @timeout(1.0)
+    def test_adv_17_level4_constructor_rejects_non_int_capacities(self):
+        with self.assertRaises(TypeError):
+            Server(max_vram_chats="2", max_ram_chats=2)  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            Server(max_vram_chats=2, max_ram_chats=2.5)  # type: ignore[arg-type]
+
+    @timeout(1.0)
+    def test_adv_18_level1_add_server_only_moves_chats_to_new_server(self):
+        ring = HashRing()
+        for server_id in ["s1", "s2", "s3", "s4"]:
+            ring.add_server(server_id)
+
+        chat_ids = [f"chat-{i}" for i in range(6000)]
+        before = {chat_id: ring.get_server(chat_id) for chat_id in chat_ids}
+
+        ring.add_server("s-new")
+        after = {chat_id: ring.get_server(chat_id) for chat_id in chat_ids}
+
+        moved = [chat_id for chat_id in chat_ids if before[chat_id] != after[chat_id]]
+        self.assertGreater(len(moved), 0)
+        self.assertTrue(all(after[chat_id] == "s-new" for chat_id in moved))
+
+    @timeout(1.0)
+    def test_adv_19_level1_remove_server_only_moves_its_previous_chats(self):
+        ring = HashRing()
+        servers = ["s1", "s2", "s3", "s4", "s5"]
+        for server_id in servers:
+            ring.add_server(server_id)
+
+        removed_server = "s3"
+        chat_ids = [f"chat-{i}" for i in range(6000)]
+        before = {chat_id: ring.get_server(chat_id) for chat_id in chat_ids}
+
+        ring.remove_server(removed_server)
+        after = {chat_id: ring.get_server(chat_id) for chat_id in chat_ids}
+
+        for chat_id in chat_ids:
+            if before[chat_id] == removed_server:
+                self.assertNotEqual(after[chat_id], removed_server)
+            else:
+                self.assertEqual(after[chat_id], before[chat_id])
+
+    @timeout(1.0)
+    def test_adv_20_level2_add_server_only_moves_chats_to_new_server(self):
+        ring = HashRingVirtual()
+        ring.add_server("a", 2)
+        ring.add_server("b", 2)
+        ring.add_server("c", 2)
+
+        chat_ids = [f"chat-{i}" for i in range(6000)]
+        before = {chat_id: ring.get_server(chat_id) for chat_id in chat_ids}
+
+        ring.add_server("new", 3)
+        after = {chat_id: ring.get_server(chat_id) for chat_id in chat_ids}
+
+        moved = [chat_id for chat_id in chat_ids if before[chat_id] != after[chat_id]]
+        self.assertGreater(len(moved), 0)
+        self.assertTrue(all(after[chat_id] == "new" for chat_id in moved))

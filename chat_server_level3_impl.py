@@ -2,7 +2,8 @@ import bisect
 import sys
 from dataclasses import dataclass
 
-from chat_server_level2_impl import HashRingVirtual
+from chat_server_level1_impl import _require_str
+from chat_server_level2_impl import HashRingVirtual, _require_int
 
 
 @dataclass(slots=True)
@@ -43,44 +44,59 @@ class ChatClient(HashRingVirtual):
         self.chat_to_server: dict[str, str] = {}
 
     def add_server(self, server_id: str, capacity_factor: int) -> bool:
+        server_id = _require_str(server_id, "server_id")
+        capacity_factor = _require_int(capacity_factor, "capacity_factor")
         return super().add_server(server_id, capacity_factor)
 
     def remove_server(self, server_id: str) -> bool:
-        removed = super().remove_server(server_id)
-        if not removed:
-            return False
+        server_id = _require_str(server_id, "server_id")
+        with self._lock:
+            removed = super().remove_server(server_id)
+            if not removed:
+                return False
 
-        self.chat_to_server = {
-            chat_id: assigned_server
-            for chat_id, assigned_server in self.chat_to_server.items()
-            if assigned_server != server_id
-        }
-        return True
+            self.chat_to_server = {
+                chat_id: assigned_server
+                for chat_id, assigned_server in self.chat_to_server.items()
+                if assigned_server != server_id
+            }
+            return True
 
     def _iter_ring_servers(self, chat_id: str):
-        if not self._ring:
-            return
+        chat_id = _require_str(chat_id, "chat_id")
+        with self._lock:
+            if not self._ring:
+                return iter(())
+            ring_snapshot = list(self._ring)
 
         chat_hash = self._hash(chat_id)
-        start = bisect.bisect_left(self._ring, chat_hash, key=self._entry_hash)
+        start = bisect.bisect_left(ring_snapshot, chat_hash, key=self._entry_hash)
         seen: set[str] = set()
+        ordered_servers: list[str] = []
 
-        for offset in range(len(self._ring)):
-            idx = (start + offset) % len(self._ring)
-            server_id = self._ring[idx][2]
+        for offset in range(len(ring_snapshot)):
+            idx = (start + offset) % len(ring_snapshot)
+            server_id = ring_snapshot[idx][2]
             if server_id in seen:
                 continue
             seen.add(server_id)
-            yield server_id
+            ordered_servers.append(server_id)
+        return iter(ordered_servers)
 
     def send_chat_message(self, chat_id: str, message: str) -> str:
-        if not self._ring:
-            raise RuntimeError("No available servers")
+        chat_id = _require_str(chat_id, "chat_id")
+        message = _require_str(message, "message")
+        with self._lock:
+            if not self._ring:
+                raise RuntimeError("No available servers")
+            affinity_server = self.chat_to_server.get(chat_id)
+            if affinity_server is not None and affinity_server not in self._servers:
+                self.chat_to_server.pop(chat_id, None)
+                affinity_server = None
 
         send_fn = _resolve_post_fn()
         tried: set[str] = set()
-        affinity_server = self.chat_to_server.get(chat_id)
-        if affinity_server is not None and affinity_server in self._servers:
+        if affinity_server is not None:
             tried.add(affinity_server)
             response = send_fn(affinity_server, chat_id, message)
             if response.success:
@@ -92,16 +108,21 @@ class ChatClient(HashRingVirtual):
             tried.add(server_id)
             response = send_fn(server_id, chat_id, message)
             if response.success:
-                self.chat_to_server[chat_id] = server_id
+                with self._lock:
+                    if server_id in self._servers:
+                        self.chat_to_server[chat_id] = server_id
                 return response.llm_reply
 
-        self.chat_to_server.pop(chat_id, None)
+        with self._lock:
+            self.chat_to_server.pop(chat_id, None)
         raise RuntimeError("All servers failed")
 
     def get_current_server(self, chat_id: str) -> str:
-        affinity_server = self.chat_to_server.get(chat_id)
-        if affinity_server is not None and affinity_server in self._servers:
-            return affinity_server
-        if affinity_server is not None and affinity_server not in self._servers:
-            self.chat_to_server.pop(chat_id, None)
+        chat_id = _require_str(chat_id, "chat_id")
+        with self._lock:
+            affinity_server = self.chat_to_server.get(chat_id)
+            if affinity_server is not None and affinity_server in self._servers:
+                return affinity_server
+            if affinity_server is not None and affinity_server not in self._servers:
+                self.chat_to_server.pop(chat_id, None)
         return self.get_server(chat_id)

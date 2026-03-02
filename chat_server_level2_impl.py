@@ -1,8 +1,14 @@
 import bisect
 
-from chat_server_level1_impl import HashRing
+from chat_server_level1_impl import HashRing, _require_str
 
 type VirtualRingEntry = tuple[int, str, str]
+
+
+def _require_int(value: object, arg_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{arg_name} must be an int")
+    return value
 
 
 class HashRingVirtual(HashRing):
@@ -21,32 +27,40 @@ class HashRingVirtual(HashRing):
 
     @property
     def servers(self) -> set[str]:
-        return set(self._servers.keys())
+        with self._lock:
+            return set(self._servers.keys())
 
     def add_server(self, server_id: str, capacity_factor: int = 1) -> bool:
+        server_id = _require_str(server_id, "server_id")
+        capacity_factor = _require_int(capacity_factor, "capacity_factor")
         assert capacity_factor >= 1
-        if server_id in self._servers:
-            return False
+        with self._lock:
+            if server_id in self._servers:
+                return False
 
-        self._servers[server_id] = capacity_factor
-        for i in range(capacity_factor):
-            virtual_id = f"{server_id}:{i}"
-            bisect.insort(self._ring, (self._hash(virtual_id), virtual_id, server_id))
-        return True
+            self._servers[server_id] = capacity_factor
+            for i in range(capacity_factor):
+                virtual_id = f"{server_id}:{i}"
+                bisect.insort(self._ring, (self._hash(virtual_id), virtual_id, server_id))
+            return True
 
     def remove_server(self, server_id: str) -> bool:
-        if server_id not in self._servers:
-            return False
-        del self._servers[server_id]
-        self._ring = [entry for entry in self._ring if entry[2] != server_id]
-        return True
+        server_id = _require_str(server_id, "server_id")
+        with self._lock:
+            if server_id not in self._servers:
+                return False
+            del self._servers[server_id]
+            self._ring = [entry for entry in self._ring if entry[2] != server_id]
+            return True
 
     def get_server(self, chat_id: str) -> str:
-        if not self._ring:
-            raise ValueError("No servers in ring")
+        chat_id = _require_str(chat_id, "chat_id")
+        with self._lock:
+            if not self._ring:
+                raise ValueError("No servers in ring")
 
-        chat_hash = self._hash(chat_id)
-        idx = bisect.bisect_left(self._ring, chat_hash, key=self._entry_hash)
-        if idx == len(self._ring):
-            idx = 0
-        return self._ring[idx][2]
+            chat_hash = self._hash(chat_id)
+            idx = bisect.bisect_left(self._ring, chat_hash, key=self._entry_hash)
+            if idx == len(self._ring):
+                idx = 0
+            return self._ring[idx][2]

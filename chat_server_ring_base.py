@@ -27,9 +27,9 @@ class BaseHashRing:
     def _remove_server_locked(self, server_id: str) -> bool:
         raise NotImplementedError
 
-    def add_server(self, server_id: str, **kwargs: Any) -> bool:
+    def add_server(self, server_id: str, *args: Any, **kwargs: Any) -> bool:
         with self._lock:
-            return self._add_server_locked(server_id, **kwargs)
+            return self._add_server_locked(server_id, *args, **kwargs)
 
     def remove_server(self, server_id: str) -> bool:
         with self._lock:

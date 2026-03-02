@@ -2,7 +2,6 @@ import bisect
 import sys
 from dataclasses import dataclass
 from itertools import chain
-from typing import Any
 
 from chat_server_level2_impl import HashRingVirtual
 
@@ -44,8 +43,8 @@ class ChatClient(HashRingVirtual):
         self.ring = self
         self.chat_to_server: dict[str, str] = {}
 
-    def add_server(self, server_id: str, *args: Any, **kwargs: Any) -> bool:
-        return super().add_server(server_id, *args, **kwargs)
+    def add_server(self, server_id: str) -> bool:
+        return super().add_server(server_id)
 
     def _drop_server_affinities_locked(self, server_id: str) -> None:
         self.chat_to_server = {

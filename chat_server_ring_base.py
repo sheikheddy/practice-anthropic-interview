@@ -21,15 +21,15 @@ class BaseHashRing:
     def _hash(self, key: str) -> int:
         raise NotImplementedError
 
-    def _add_server_locked(self, server_id: str, **kwargs: Any) -> bool:
+    def _add_server_locked(self, server_id: str) -> bool:
         raise NotImplementedError
 
     def _remove_server_locked(self, server_id: str) -> bool:
         raise NotImplementedError
 
-    def add_server(self, server_id: str, *args: Any, **kwargs: Any) -> bool:
+    def add_server(self, server_id: str) -> bool:
         with self._lock:
-            return self._add_server_locked(server_id, *args, **kwargs)
+            return self._add_server_locked(server_id)
 
     def remove_server(self, server_id: str) -> bool:
         with self._lock:
